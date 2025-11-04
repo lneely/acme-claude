@@ -1,4 +1,4 @@
-# claude-acme
+# acme-claude
 
 A Go wrapper program around the Claude CLI that integrates with the Plan 9 acme editor for non-interactive Claude usage with conversation history and permission management.
 
@@ -7,7 +7,7 @@ A Go wrapper program around the Claude CLI that integrates with the Plan 9 acme 
 claude-acme provides three main components that work together to create a seamless Claude experience within acme:
 
 - **Claude** - Creates prompt and chat history windows
-- **Prompt** - Processes user input and streams Claude responses  
+- **Prompt** - Processes user input and streams Claude responses
 - **Claude-Reset** - Clears conversation context
 - **Claude-Permissions** - Manages tool permissions per directory
 
@@ -111,7 +111,7 @@ In the `+Claude-Permissions` window:
 To grant web access, edit to:
 ```
 + Bash
-+ Read  
++ Read
 + Write
 + Edit
 + WebSearch
@@ -164,7 +164,7 @@ Limit file operations to specific directories:
 claude-acme/
 ├── cmd/
 │   ├── Claude/           # Window creation command
-│   ├── Prompt/           # Main processing command  
+│   ├── Prompt/           # Main processing command
 │   ├── Claude-Reset/     # Context reset command
 │   └── Claude-Permissions/ # Permission management
 ├── internal/
@@ -202,7 +202,7 @@ Claude-Permissions
 # Now Claude can run tests, build, and commit changes
 ```
 
-### Research Workflow  
+### Research Workflow
 ```bash
 # In research directory
 cd ~/research
