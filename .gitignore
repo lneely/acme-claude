@@ -1,0 +1,7 @@
+.claude
+
+# Binary outputs (ignore the binaries but not source in cmd/)
+/Claude
+/Prompt
+/Claude-Reset
+/Claude-Permissions
