@@ -1,15 +1,14 @@
 # acme-claude
 
-A Go wrapper program around the Claude CLI that integrates with the Plan 9 acme editor for non-interactive Claude usage with conversation history and permission management.
+A unified Go wrapper program around the Claude CLI that integrates with the Plan 9 acme editor for non-interactive Claude usage with conversation history and permission management.
 
 ## Overview
 
-claude-acme provides three main components that work together to create a seamless Claude experience within acme:
+acme-claude provides a single unified program that handles all Claude interactions within acme through an event-driven interface:
 
-- **Claude** - Creates prompt and chat history windows
-- **Prompt** - Processes user input and streams Claude responses
-- **Claude-Reset** - Clears conversation context
-- **Claude-Permissions** - Manages tool permissions per directory
+- **Unified Event Handling** - Single program manages all window events and commands
+- **Integrated Commands** - Prompt processing, conversation reset, and permission management all built-in
+- **Native acme Integration** - Uses acme's window event system for seamless interaction
 
 ## Features
 
@@ -33,71 +32,59 @@ claude-acme provides three main components that work together to create a seamle
 mk install
 ```
 
-This will build and install all four binaries to `$HOME/bin`.
+This will build and install the unified Claude binary to `$HOME/bin`.
 
 ## Usage
 
 ### Basic Workflow
 
-1. **Start a conversation**:
+1. **Start Claude**:
    ```bash
    Claude
    ```
    This creates two windows in your current directory:
    - `$pwd/+Prompt` - Where you type your prompts
-   - `$pwd/+Claude` - Chat history with full conversation
+   - `$pwd/+Claude` - Main interface with clickable commands: `Reset Permissions`
 
 2. **Send a prompt**:
    - Type your question/request in the `+Prompt` window
-   - Click "Prompt" in the window's tag bar
+   - Middle-click anywhere in the prompt text to send
    - Your input is immediately moved to `+Claude` and Claude's response streams in real-time
 
 3. **Continue the conversation**:
    - Type follow-up questions in `+Prompt`
-   - Click "Prompt" again
+   - Middle-click the prompt text again
    - Full conversation context is maintained automatically
 
-4. **Reset conversation** (optional):
-   ```bash
-   Claude-Reset
-   ```
+4. **Reset conversation**:
+   - Middle-click "Reset" in the `+Claude` window's tag bar
+
+5. **Manage permissions**:
+   - Middle-click "Permissions" in the `+Claude` window's tag bar
 
 ### Permission Management
 
-Claude-Permissions provides fine-grained control over what tools Claude can use in each directory.
+The unified Claude program provides fine-grained control over what tools Claude can use in each directory.
 
-#### Basic Permission Commands
+#### Accessing Permission Management
 
-- **View current permissions**:
-  ```bash
-  Claude-Permissions
-  ```
-
-- **See available tools to grant**:
-  ```bash
-  Claude-Permissions ?
-  ```
+- **Open permissions interface**:
+  - Middle-click "Permissions" in the `+Claude` window's tag bar
+  - This opens the `+Claude-Permissions` window
 
 #### Interactive Permission Editing
 
-1. Run `Claude-Permissions` to see current permissions in the `+Claude-Permissions` window
+1. Middle-click "Permissions" to see current permissions in the `+Claude-Permissions` window
 2. Edit the list by adding prefixes:
    - `+` = Allow tool
    - `-` = Deny tool
    - `~` = Remove explicit permission (back to default)
-3. Select the modified text and run:
-   ```bash
-   Claude-Permissions 'selected_text'
-   ```
+3. Select the modified text and middle-click to apply changes
 
 #### Example Permission Session
 
-```bash
-# View current permissions
-Claude-Permissions
-```
-
-In the `+Claude-Permissions` window:
+1. Middle-click "Permissions" in the `+Claude` window
+2. The `+Claude-Permissions` window shows:
 ```
 # Active permissions for: /home/user/myproject
 # Permission Mode: acceptEdits
@@ -108,7 +95,7 @@ In the `+Claude-Permissions` window:
 + Edit
 ```
 
-To grant web access, edit to:
+3. To grant web access, edit to:
 ```
 + Bash
 + Read
@@ -118,7 +105,7 @@ To grant web access, edit to:
 + WebFetch
 ```
 
-Select the text and run `Claude-Permissions 'selected_text'`.
+4. Select the modified text and middle-click to apply the changes
 
 ### Available Tools
 
@@ -161,16 +148,12 @@ Limit file operations to specific directories:
 
 ### Directory Structure
 ```
-claude-acme/
-├── cmd/
-│   ├── Claude/           # Window creation command
-│   ├── Prompt/           # Main processing command
-│   ├── Claude-Reset/     # Context reset command
-│   └── Claude-Permissions/ # Permission management
+acme-claude/
+├── main.go             # Unified Claude program entry point
 ├── internal/
-│   ├── acme/            # Acme 9p protocol wrapper
-│   └── context/         # Context and settings management
-└── mkfile               # Plan 9 makefile
+│   ├── acme/          # Acme 9p protocol wrapper
+│   └── context/       # Context and settings management
+└── mkfile             # Plan 9 makefile
 ```
 
 ### Context Management
@@ -196,8 +179,9 @@ cd ~/myproject
 Claude
 
 # Allow development tools
-Claude-Permissions
-# Edit to allow: +Bash(go:*) +Bash(git:*) +Read +Write +Edit
+# - Middle-click "Permissions" in +Claude window
+# - Edit to allow: +Bash(go:*) +Bash(git:*) +Read +Write +Edit
+# - Select text and middle-click to apply
 
 # Now Claude can run tests, build, and commit changes
 ```
@@ -206,20 +190,24 @@ Claude-Permissions
 ```bash
 # In research directory
 cd ~/research
+Claude
 
 # Allow web access but restrict file operations
-Claude-Permissions
-# Edit to allow: +WebSearch +WebFetch +Read +Edit(/home/user/research/*)
+# - Middle-click "Permissions" in +Claude window
+# - Edit to allow: +WebSearch +WebFetch +Read +Edit(/home/user/research/*)
+# - Select text and middle-click to apply
 ```
 
 ### Safe Exploration
 ```bash
 # New directory
 cd ~/experiments
+Claude
 
 # Very restricted permissions
-Claude-Permissions
-# Edit to allow: +Read +Bash(ls:*) +Bash(cat:*)
+# - Middle-click "Permissions" in +Claude window  
+# - Edit to allow: +Read +Bash(ls:*) +Bash(cat:*)
+# - Select text and middle-click to apply
 
 # Claude can only read files and do basic listing
 ```
@@ -227,9 +215,9 @@ Claude-Permissions
 ## Troubleshooting
 
 ### Claude not respecting permissions
-- Check that permissions show correctly with `Claude-Permissions`
+- Check that permissions show correctly by middle-clicking "Permissions"
 - Verify that both allowed and denied tools are being set
-- Try `Claude-Reset` to clear any cached context
+- Try middle-clicking "Reset" to clear any cached context
 
 ### Windows not appearing
 - Ensure acme is running
@@ -237,7 +225,7 @@ Claude-Permissions
 - Try running `Claude` again to recreate windows
 
 ### Permission changes not taking effect
-- Make sure to select the entire modified text when running `Claude-Permissions 'text'`
+- Make sure to select the entire modified text when middle-clicking to apply
 - Check the `+Claude-Permissions` window for error messages
 - Verify the permission format (correct prefixes: `+`, `-`, `~`)
 
