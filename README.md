@@ -4,11 +4,7 @@ A unified Go wrapper program around the Claude CLI that integrates with the Plan
 
 ## Overview
 
-acme-claude provides a single unified program that handles all Claude interactions within acme through an event-driven interface:
-
-- **Unified Event Handling** - Single program manages all window events and commands
-- **Integrated Commands** - Prompt processing, conversation reset, and permission management all built-in
-- **Native acme Integration** - Uses acme's window event system for seamless interaction
+acme-claude provides a wrapper program around the claude CLI for use in the acme editor.
 
 ## Features
 
@@ -205,7 +201,7 @@ cd ~/experiments
 Claude
 
 # Very restricted permissions
-# - Middle-click "Permissions" in +Claude window  
+# - Middle-click "Permissions" in +Claude window
 # - Edit to allow: +Read +Bash(ls:*) +Bash(cat:*)
 # - Select text and middle-click to apply
 
