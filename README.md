@@ -1,6 +1,6 @@
 # acme-claude
 
-A unified Go wrapper program around the Claude CLI that integrates with the Plan 9 acme editor for non-interactive Claude usage with conversation history and permission management.
+Go wrapper program around the Claude CLI that integrates with the Plan 9 acme editor for non-interactive Claude usage with conversation history and permission management.
 
 ## Features
 
