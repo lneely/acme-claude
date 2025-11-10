@@ -40,7 +40,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	//acme.TagSet(claudeWinName, "Reset Permissions")
+	acme.TagSet(claudeWinName, "Reset Permissions")
 
 	go createPromptWindow(w)
 	displayHelp(w)
