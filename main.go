@@ -2,124 +2,100 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 
-	"9fans.net/go/acme"
-	internalAcme "claude-acme/internal/acme"
+	"claude-acme/internal/acme"
 	"claude-acme/internal/context"
+
+	a "9fans.net/go/acme"
 )
 
 var (
-	client         *internalAcme.Client
 	contextManager *context.Manager
 	workingDir     string
-	promptWindow   string
-	claudeWindow   string
+	promptWinName  string
+	claudeWinName  string
 )
 
 func main() {
 	var err error
-
-	client = internalAcme.NewClient()
-	defer client.Close()
 
 	contextManager, err = context.NewManager()
 	if err != nil {
 		log.Fatalf("Failed to create context manager: %v", err)
 	}
 
-	workingDir = internalAcme.GetCurrentWorkingDir()
-	if workingDir == "" {
-		log.Fatalf("Failed to get current working directory")
-	}
-
-	promptWindow = internalAcme.GetWindowName("+Prompt")
-	claudeWindow = internalAcme.GetWindowName("+Claude")
+	promptWinName = prependCwd("+Prompt")
+	claudeWinName = prependCwd("+Claude")
 
 	// Create the main Claude window if it doesn't exist
-	w, err := acme.New()
+	w, err := acme.WindowOpen(claudeWinName)
 	if err != nil {
 		log.Fatal(err)
 	}
-	w.Name(claudeWindow)
-	w.Fprintf("tag", "Reset Permissions")
-	w.Ctl("clean")
+	//acme.TagSet(claudeWinName, "Reset Permissions")
 
-	// Create prompt window with event handling
 	go createPromptWindow(w)
-
-	// Initial display
 	displayHelp(w)
 
-	// Main event loop - similar to Ampd
 	for e := range w.EventChan() {
 		switch e.C2 {
 		case 'x', 'X': // execute (middle-click)
-			handleExecute(w, string(e.Text))
+			switch string(e.Text) {
+			case "Del":
+				w.Ctl("delete")
+				return
+			case "Reset":
+				executeReset(w)
+			case "Permissions":
+				executePermissions()
+			default:
+				w.WriteEvent(e)
+			}
 		case 'l', 'L': // look
 			w.Ctl("clean")
 		}
 	}
 }
 
-func createPromptWindow(claudeWin *acme.Win) {
-	// Create prompt window
-	promptWin, err := acme.New()
+func createPromptWindow(claudeWin *a.Win) {
+	w, err := acme.WindowOpen(promptWinName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create prompt window: %v\n", err)
-		return
+		log.Fatal(err)
 	}
-	defer promptWin.CloseFiles()
-	promptWin.Name(promptWindow)
+	defer w.CloseFiles()
 
-	// Set the tag with Prompt command
-	err = client.SetWindowTag(promptWindow, "Prompt")
-	if err != nil {
+	if err = acme.TagSet(promptWinName, "Prompt"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to set prompt window tag: %v\n", err)
 		return
 	}
 
-	// Event loop for prompt window
-	for e := range promptWin.EventChan() {
+	for e := range w.EventChan() {
 		switch e.C2 {
 		case 'x', 'X': // execute (middle-click)
 			switch string(e.Text) {
 			case "Del":
-				promptWin.Ctl("delete")
+				w.Ctl("delete")
 				return
 			case "Prompt":
 				executePrompt(claudeWin)
 			default:
-				promptWin.WriteEvent(e)
+				w.WriteEvent(e)
 			}
 		case 'l', 'L': // look
-			promptWin.Ctl("clean")
+			w.Ctl("clean")
 		}
 	}
 }
 
-
-func handleExecute(w *acme.Win, command string) {
-	switch command {
-	case "Del":
-		w.Ctl("delete")
-		return
-	case "Reset":
-		executeReset(w)
-	case "Permissions":
-		executePermissions(w)
-	default:
-		// For unknown commands, pass through to acme
-		e := acme.Event{Text: []byte(command)}
-		w.WriteEvent(&e)
-	}
-}
-
-func displayHelp(w *acme.Win) {
+func displayHelp(w *a.Win) {
 	w.Clear()
 	help := `Claude - AI Assistant for Acme
 
@@ -140,22 +116,22 @@ Ready for your input!
 	w.Ctl("clean")
 }
 
-func executePrompt(w *acme.Win) {
+func executePrompt(w *a.Win) {
 	// Read content from prompt window
-	promptContent, err := client.ReadFromWindow(promptWindow)
+	promptContent, err := acme.BodyRead(promptWinName)
 	if err != nil {
 		w.Fprintf("body", "Error reading from prompt window: %v\n", err)
 		return
 	}
 
-	promptContent = strings.TrimSpace(promptContent)
-	if promptContent == "" {
-		w.Fprintf("body", "Prompt window is empty. Please enter your request in +Prompt window first.\n")
+	promptContent = bytes.TrimSpace(promptContent)
+	if len(promptContent) == 0 {
+		acme.BodyWrite(promptWinName, "$", []byte("Prompt window is empty. Please enter your request in +Prompt window first.\n"))
 		return
 	}
 
 	// Clear prompt window
-	err = client.ClearWindow(promptWindow)
+	err = acme.BodyWrite(promptWinName, ",", []byte(""))
 	if err != nil {
 		w.Fprintf("body", "Error clearing prompt window: %v\n", err)
 		return
@@ -165,7 +141,7 @@ func executePrompt(w *acme.Win) {
 	w.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", promptContent)
 
 	// Build full prompt with context
-	fullPrompt, err := contextManager.BuildPrompt(workingDir, promptContent)
+	fullPrompt, err := contextManager.BuildPrompt(workingDir, string(promptContent))
 	if err != nil {
 		w.Fprintf("body", "Error building prompt with context: %v\n", err)
 		return
@@ -273,7 +249,7 @@ func executePrompt(w *acme.Win) {
 	w.Fprintf("body", "\n====================\n\n")
 
 	// Save to context
-	err = contextManager.AddMessage(workingDir, "user", promptContent)
+	err = contextManager.AddMessage(workingDir, "user", string(promptContent))
 	if err != nil {
 		w.Fprintf("body", "Warning: Failed to save user message to context: %v\n", err)
 	}
@@ -284,7 +260,7 @@ func executePrompt(w *acme.Win) {
 	}
 }
 
-func executeReset(w *acme.Win) {
+func executeReset(w *a.Win) {
 	err := contextManager.ClearContext(workingDir)
 	if err != nil {
 		w.Fprintf("body", "Error clearing context: %v\n", err)
@@ -294,7 +270,7 @@ func executeReset(w *acme.Win) {
 	w.Fprintf("body", "✓ Cleared Claude context for directory: %s\n", workingDir)
 }
 
-func executePermissions(w *acme.Win) {
+func executePermissions() {
 	// Create permissions window similar to how Ampd creates sub-windows
 	go permissionsWindow()
 }
@@ -308,13 +284,13 @@ func parseDebugMessage(line string) (string, bool) {
 }
 
 func permissionsWindow() {
-	permWindow, err := acme.New()
+	permWindow, err := a.New()
 	if err != nil {
 		fmt.Printf("Couldn't create permissions window: %v\n", err)
 		return
 	}
 
-	permWindowName := internalAcme.GetWindowName("+Claude-Permissions")
+	permWindowName := prependCwd("+Claude-Permissions")
 	permWindow.Name(permWindowName)
 	permWindow.Fprintf("tag", "Show Edit Save")
 	permWindow.Ctl("clean")
@@ -345,7 +321,7 @@ func permissionsWindow() {
 	}
 }
 
-func showCurrentPermissions(w *acme.Win) {
+func showCurrentPermissions(w *a.Win) {
 	settings, err := contextManager.LoadSettings(workingDir)
 	if err != nil {
 		w.Fprintf("body", "Error loading settings: %v\n", err)
@@ -380,7 +356,7 @@ var allAvailableTools = []string{
 	"Edit(/path/to/dir/*)", "Read(/path/to/dir/*)", "Write(/path/to/dir/*)",
 }
 
-func listAllToolsForEditing(w *acme.Win) {
+func listAllToolsForEditing(w *a.Win) {
 	settings, err := contextManager.LoadSettings(workingDir)
 	if err != nil {
 		w.Fprintf("body", "Error loading settings: %v\n", err)
@@ -404,7 +380,7 @@ func listAllToolsForEditing(w *acme.Win) {
 	w.Ctl("clean")
 }
 
-func savePermissionChanges(w *acme.Win) {
+func savePermissionChanges(w *a.Win) {
 	content, err := w.ReadAll("body")
 	if err != nil {
 		w.Fprintf("body", "Error reading window content: %v\n", err)
@@ -446,22 +422,26 @@ func savePermissionChanges(w *acme.Win) {
 
 	// Update settings
 	for _, tool := range toAllow {
-		if !contains(settings.AllowedTools, tool) {
+		if !slices.Contains(settings.AllowedTools, tool) {
 			settings.AllowedTools = append(settings.AllowedTools, tool)
 		}
-		settings.DisallowedTools = remove(settings.DisallowedTools, tool)
+		i := slices.Index(settings.DisallowedTools, tool)
+		settings.DisallowedTools = slices.Delete(settings.DisallowedTools, i, i+1)
 	}
 
 	for _, tool := range toDeny {
-		if !contains(settings.DisallowedTools, tool) {
+		if !slices.Contains(settings.DisallowedTools, tool) {
 			settings.DisallowedTools = append(settings.DisallowedTools, tool)
 		}
-		settings.AllowedTools = remove(settings.AllowedTools, tool)
+		i := slices.Index(settings.AllowedTools, tool)
+		settings.AllowedTools = slices.Delete(settings.AllowedTools, i, i+1)
 	}
 
 	for _, tool := range toRemove {
-		settings.AllowedTools = remove(settings.AllowedTools, tool)
-		settings.DisallowedTools = remove(settings.DisallowedTools, tool)
+		i := slices.Index(settings.AllowedTools, tool)
+		settings.AllowedTools = slices.Delete(settings.AllowedTools, i, i+1)
+		i = slices.Index(settings.DisallowedTools, tool)
+		settings.DisallowedTools = slices.Delete(settings.DisallowedTools, i, i+1)
 	}
 
 	err = contextManager.SaveSettings(workingDir, settings)
@@ -474,21 +454,10 @@ func savePermissionChanges(w *acme.Win) {
 	showCurrentPermissions(w)
 }
 
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
+func prependCwd(suffix string) string {
+	pwd, err := os.Getwd()
+	if err != nil {
+		pwd = ""
 	}
-	return false
-}
-
-func remove(slice []string, item string) []string {
-	result := make([]string, 0)
-	for _, s := range slice {
-		if s != item {
-			result = append(result, s)
-		}
-	}
-	return result
+	return filepath.Join(pwd, suffix)
 }
