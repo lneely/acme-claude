@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"claude-acme/internal/acme"
 	"claude-acme/internal/context"
@@ -83,11 +85,12 @@ func executePrompt(w *a.Win) {
 		return
 	}
 
-	// Display user input
-	w.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", promptContent)
+	// Strip USER: prefix if present and display user input
+	userInput := strings.TrimPrefix(string(promptContent), "USER:\n")
+	w.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", userInput)
 
 	// Build full prompt with context
-	fullPrompt, err := ctx.BuildPrompt(cwd, string(promptContent))
+	fullPrompt, err := ctx.BuildPrompt(cwd, userInput)
 	if err != nil {
 		w.Fprintf("body", "Error building prompt with context: %v\n", err)
 		return
@@ -101,7 +104,7 @@ func executePrompt(w *a.Win) {
 	}
 
 	// Build claude command with arguments
-	args := []string{"-p", "--debug"}
+	args := []string{"-p", "-d"}
 
 	if len(settings.AllowedTools) > 0 {
 		args = append(args, "--allowedTools")
@@ -150,59 +153,63 @@ func executePrompt(w *a.Win) {
 		stdin.Write([]byte(fullPrompt))
 	}()
 
-	// Process output
-	var claudeResponse strings.Builder
-	var errorOutput strings.Builder
-
-	// Read stderr for debug output - route ALL stderr to os.Stderr
-	go func() {
-		stderrScanner := bufio.NewScanner(stderr)
-		for stderrScanner.Scan() {
-			line := stderrScanner.Text()
-			if actionMsg, isDebug := parseDebugMessage(line); isDebug {
-				fmt.Fprintln(os.Stderr, actionMsg)
-			} else {
-				// Route all other stderr content to stderr as well
-				fmt.Fprintln(os.Stderr, line)
-				errorOutput.WriteString(line + "\n")
-			}
+	// Open trace window for debug output
+	traceWname := prependCwd("+ClaudeTrace")
+	traceWin, err := acme.WindowOpen(traceWname)
+	if err != nil {
+		w.Fprintf("body", "Warning: Could not open trace window: %v\n", err)
+		traceWin = nil
+	}
+	defer func() {
+		if traceWin != nil {
+			traceWin.CloseFiles()
 		}
 	}()
 
-	// Read and stream stdout to window
-	stdoutScanner := bufio.NewScanner(stdout)
-	for stdoutScanner.Scan() {
-		line := stdoutScanner.Text()
+	// Handle stdout and stderr streams
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		handleClaudeOutput(w, stdout, traceWin)
+	}()
+	go func() {
+		defer wg.Done()
+		handleClaudeOutput(w, stderr, traceWin)
+	}()
 
-		if !strings.HasPrefix(line, "[DEBUG]") && strings.TrimSpace(line) != "" {
-			claudeResponse.WriteString(line + "\n")
-			w.Fprintf("body", "%s\n", line)
-		}
-	}
-
-	// Wait for command to finish
+	// Wait for command and streams to finish
 	err = cmd.Wait()
+	wg.Wait()
 	if err != nil {
-		errorMsg := fmt.Sprintf("\n[Error: %v]", err)
-		if errorOutput.Len() > 0 {
-			errorMsg += "\nClaude CLI Error Output:\n" + errorOutput.String()
-		}
-		w.Fprintf("body", errorMsg)
+		w.Fprintf("body", "\n[Error: %v]", err)
 		return
 	}
 
 	// Add separator
 	w.Fprintf("body", "\n====================\n\nUSER:\n")
 
-	// Save to context
-	err = ctx.AddMessage(cwd, "user", string(promptContent))
+	// Save to context (user input only - Claude's response will be added separately)
+	err = ctx.AddMessage(cwd, "user", userInput)
 	if err != nil {
 		w.Fprintf("body", "Warning: Failed to save user message to context: %v\n", err)
 	}
+}
 
-	err = ctx.AddMessage(cwd, "assistant", strings.TrimSpace(claudeResponse.String()))
-	if err != nil {
-		w.Fprintf("body", "Warning: Failed to save Claude response to context: %v\n", err)
+func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
+	scanner := bufio.NewScanner(stream)
+	for scanner.Scan() {
+		line := scanner.Text()
+		
+		if strings.HasPrefix(line, "[DEBUG] ") {
+			// Send debug messages to trace window
+			if traceWin != nil {
+				traceWin.Fprintf("body", "%s\n", line)
+			}
+		} else {
+			// Send regular output to claude window
+			claudeWin.Fprintf("body", "%s\n", line)
+		}
 	}
 }
 
@@ -219,14 +226,6 @@ func executeReset(w *a.Win) {
 func executePermissions() {
 	// Create permissions window similar to how Ampd creates sub-windows
 	go permissionsWindow()
-}
-
-func parseDebugMessage(line string) (string, bool) {
-	if strings.HasPrefix(line, "[DEBUG]") {
-		cleanLine := strings.TrimPrefix(line, "[DEBUG] ")
-		return "🔍 " + cleanLine, true
-	}
-	return "", false
 }
 
 func permissionsWindow() {
