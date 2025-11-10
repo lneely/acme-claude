@@ -425,23 +425,19 @@ func savePermissionChanges(w *a.Win) {
 		if !slices.Contains(settings.AllowedTools, tool) {
 			settings.AllowedTools = append(settings.AllowedTools, tool)
 		}
-		i := slices.Index(settings.DisallowedTools, tool)
-		settings.DisallowedTools = slices.Delete(settings.DisallowedTools, i, i+1)
+		settings.DisallowedTools = remove(settings.DisallowedTools, tool)
 	}
 
 	for _, tool := range toDeny {
 		if !slices.Contains(settings.DisallowedTools, tool) {
 			settings.DisallowedTools = append(settings.DisallowedTools, tool)
 		}
-		i := slices.Index(settings.AllowedTools, tool)
-		settings.AllowedTools = slices.Delete(settings.AllowedTools, i, i+1)
+		settings.AllowedTools = remove(settings.AllowedTools, tool)
 	}
 
 	for _, tool := range toRemove {
-		i := slices.Index(settings.AllowedTools, tool)
-		settings.AllowedTools = slices.Delete(settings.AllowedTools, i, i+1)
-		i = slices.Index(settings.DisallowedTools, tool)
-		settings.DisallowedTools = slices.Delete(settings.DisallowedTools, i, i+1)
+		settings.AllowedTools = remove(settings.AllowedTools, tool)
+		settings.DisallowedTools = remove(settings.DisallowedTools, tool)
 	}
 
 	err = contextManager.SaveSettings(workingDir, settings)
@@ -460,4 +456,14 @@ func prependCwd(suffix string) string {
 		pwd = ""
 	}
 	return filepath.Join(pwd, suffix)
+}
+
+func remove(slice []string, item string) []string {
+	result := make([]string, 0)
+	for _, s := range slice {
+		if s != item {
+			result = append(result, s)
+		}
+	}
+	return result
 }
