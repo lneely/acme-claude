@@ -24,7 +24,7 @@ Go wrapper program around the Claude CLI that integrates with the Plan 9 acme ed
 mk install
 ```
 
-This will build and install the unified Claude binary to `$HOME/bin`.
+This will build and install the Claude binary to `$HOME/bin`.
 
 ## Usage
 
@@ -57,7 +57,7 @@ This will build and install the unified Claude binary to `$HOME/bin`.
 
 ### Permission Management
 
-The unified Claude program provides fine-grained control over what tools Claude can use in each directory.
+The Claude program provides fine-grained control over what tools Claude can use in each directory.
 
 #### Accessing Permission Management
 
