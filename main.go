@@ -18,107 +18,53 @@ import (
 )
 
 var (
-	contextManager *context.Manager
-	workingDir     string
-	promptWinName  string
-	claudeWinName  string
+	ctx   *context.Manager
+	cwd   string
+	wname string
 )
 
 func main() {
 	var err error
 
-	contextManager, err = context.NewManager()
+	ctx, err = context.NewManager()
 	if err != nil {
 		log.Fatalf("Failed to create context manager: %v", err)
 	}
 
-	promptWinName = prependCwd("+Prompt")
-	claudeWinName = prependCwd("+Claude")
+	wname = prependCwd("+Claude")
 
-	// Create the main Claude window if it doesn't exist
-	w, err := acme.WindowOpen(claudeWinName)
+	pw, err := acme.WindowOpen(wname)
 	if err != nil {
 		log.Fatal(err)
 	}
-	acme.TagSet(claudeWinName, "Reset Permissions")
-
-	go createPromptWindow(w)
-	displayHelp(w)
-
-	for e := range w.EventChan() {
-		switch e.C2 {
-		case 'x', 'X': // execute (middle-click)
-			switch string(e.Text) {
-			case "Del":
-				w.Ctl("delete")
-				return
-			case "Reset":
-				executeReset(w)
-			case "Permissions":
-				executePermissions()
-			default:
-				w.WriteEvent(e)
-			}
-		case 'l', 'L': // look
-			w.Ctl("clean")
-		}
-	}
-}
-
-func createPromptWindow(claudeWin *a.Win) {
-	w, err := acme.WindowOpen(promptWinName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer w.CloseFiles()
-
-	if err = acme.TagSet(promptWinName, "Prompt"); err != nil {
+	defer pw.CloseFiles()
+	if err = acme.TagSet(wname, "Send Permissions Reset"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to set prompt window tag: %v\n", err)
 		return
 	}
 
-	for e := range w.EventChan() {
+	for e := range pw.EventChan() {
 		switch e.C2 {
 		case 'x', 'X': // execute (middle-click)
 			switch string(e.Text) {
-			case "Del":
-				w.Ctl("delete")
-				return
-			case "Prompt":
-				executePrompt(claudeWin)
+			case "Send":
+				executePrompt(pw)
+			case "Reset":
+				executeReset(pw)
+			case "Permissions":
+				executePermissions()
 			default:
-				w.WriteEvent(e)
+				pw.WriteEvent(e)
 			}
 		case 'l', 'L': // look
-			w.Ctl("clean")
+			pw.Ctl("clean")
 		}
 	}
 }
 
-func displayHelp(w *a.Win) {
-	w.Clear()
-	help := `Claude - AI Assistant for Acme
-
-Commands:
-  Reset       - Clear conversation context for current directory
-  Permissions - Manage tool permissions for Claude
-
-Usage:
-1. Type your question/request in the +Prompt window
-2. Middle-click 'Prompt' in the +Prompt window to send it to Claude
-3. Claude's response appears in this window
-
-Current directory: ` + workingDir + `
-
-Ready for your input!
-`
-	w.Fprintf("body", help)
-	w.Ctl("clean")
-}
-
 func executePrompt(w *a.Win) {
 	// Read content from prompt window
-	promptContent, err := acme.BodyRead(promptWinName)
+	promptContent, err := acme.BodyRead(wname)
 	if err != nil {
 		w.Fprintf("body", "Error reading from prompt window: %v\n", err)
 		return
@@ -126,12 +72,12 @@ func executePrompt(w *a.Win) {
 
 	promptContent = bytes.TrimSpace(promptContent)
 	if len(promptContent) == 0 {
-		acme.BodyWrite(promptWinName, "$", []byte("Prompt window is empty. Please enter your request in +Prompt window first.\n"))
+		acme.BodyWrite(wname, "$", []byte("Prompt window is empty. Please enter your request in +Prompt window first.\n"))
 		return
 	}
 
 	// Clear prompt window
-	err = acme.BodyWrite(promptWinName, ",", []byte(""))
+	err = acme.BodyWrite(wname, ",", []byte(""))
 	if err != nil {
 		w.Fprintf("body", "Error clearing prompt window: %v\n", err)
 		return
@@ -141,14 +87,14 @@ func executePrompt(w *a.Win) {
 	w.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", promptContent)
 
 	// Build full prompt with context
-	fullPrompt, err := contextManager.BuildPrompt(workingDir, string(promptContent))
+	fullPrompt, err := ctx.BuildPrompt(cwd, string(promptContent))
 	if err != nil {
 		w.Fprintf("body", "Error building prompt with context: %v\n", err)
 		return
 	}
 
 	// Load settings for tool permissions
-	settings, err := contextManager.LoadSettings(workingDir)
+	settings, err := ctx.LoadSettings(cwd)
 	if err != nil {
 		w.Fprintf("body", "Error loading settings: %v\n", err)
 		return
@@ -246,28 +192,28 @@ func executePrompt(w *a.Win) {
 	}
 
 	// Add separator
-	w.Fprintf("body", "\n====================\n\n")
+	w.Fprintf("body", "\n====================\n\nUSER:\n")
 
 	// Save to context
-	err = contextManager.AddMessage(workingDir, "user", string(promptContent))
+	err = ctx.AddMessage(cwd, "user", string(promptContent))
 	if err != nil {
 		w.Fprintf("body", "Warning: Failed to save user message to context: %v\n", err)
 	}
 
-	err = contextManager.AddMessage(workingDir, "assistant", strings.TrimSpace(claudeResponse.String()))
+	err = ctx.AddMessage(cwd, "assistant", strings.TrimSpace(claudeResponse.String()))
 	if err != nil {
 		w.Fprintf("body", "Warning: Failed to save Claude response to context: %v\n", err)
 	}
 }
 
 func executeReset(w *a.Win) {
-	err := contextManager.ClearContext(workingDir)
+	err := ctx.ClearContext(cwd)
 	if err != nil {
 		w.Fprintf("body", "Error clearing context: %v\n", err)
 		return
 	}
 
-	w.Fprintf("body", "✓ Cleared Claude context for directory: %s\n", workingDir)
+	w.Fprintf("body", "✓ Cleared Claude context for directory: %s\n", cwd)
 }
 
 func executePermissions() {
@@ -322,14 +268,14 @@ func permissionsWindow() {
 }
 
 func showCurrentPermissions(w *a.Win) {
-	settings, err := contextManager.LoadSettings(workingDir)
+	settings, err := ctx.LoadSettings(cwd)
 	if err != nil {
 		w.Fprintf("body", "Error loading settings: %v\n", err)
 		return
 	}
 
 	w.Clear()
-	w.Fprintf("body", "# Active permissions for: %s\n", workingDir)
+	w.Fprintf("body", "# Active permissions for: %s\n", cwd)
 	w.Fprintf("body", "# Permission Mode: %s\n", settings.PermissionMode)
 	if len(settings.AdditionalDirs) > 0 {
 		w.Fprintf("body", "# Additional Directories: %s\n", strings.Join(settings.AdditionalDirs, ", "))
@@ -357,7 +303,7 @@ var allAvailableTools = []string{
 }
 
 func listAllToolsForEditing(w *a.Win) {
-	settings, err := contextManager.LoadSettings(workingDir)
+	settings, err := ctx.LoadSettings(cwd)
 	if err != nil {
 		w.Fprintf("body", "Error loading settings: %v\n", err)
 		return
@@ -387,7 +333,7 @@ func savePermissionChanges(w *a.Win) {
 		return
 	}
 
-	settings, err := contextManager.LoadSettings(workingDir)
+	settings, err := ctx.LoadSettings(cwd)
 	if err != nil {
 		w.Fprintf("body", "Error loading settings: %v\n", err)
 		return
@@ -440,7 +386,7 @@ func savePermissionChanges(w *a.Win) {
 		settings.DisallowedTools = remove(settings.DisallowedTools, tool)
 	}
 
-	err = contextManager.SaveSettings(workingDir, settings)
+	err = ctx.SaveSettings(cwd, settings)
 	if err != nil {
 		w.Fprintf("body", "Error saving settings: %v\n", err)
 		return
