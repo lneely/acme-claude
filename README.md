@@ -1,6 +1,6 @@
 # acme-claude
 
-Go wrapper program around the Claude CLI that integrates with the Plan 9 acme editor for non-interactive Claude usage with conversation history and permission management.
+Go wrapper program around the Claude CLI that integrates with the Plan 9 acme editor for quasi-interactive Claude usage with conversation history and permission management.
 
 ## Features
 
@@ -31,25 +31,26 @@ This will build and install the unified Claude binary to `$HOME/bin`.
 ### Basic Workflow
 
 1. **Start Claude**:
-   ```bash
-   Claude
-   ```
-   This creates two windows in your current directory:
-   - `$pwd/+Prompt` - Where you type your prompts
-   - `$pwd/+Claude` - Main interface with clickable commands: `Reset Permissions`
+   Type `Claude` in the tag of some window (e.g., a project working directory).
+   Middle-click on Claude to run the program.
+
+   This creates the +Claude window for that working directory. This is a quasi-interactive
+   chat interface.
 
 2. **Send a prompt**:
-   - Type your question/request in the `+Prompt` window
-   - Middle-click anywhere in the prompt text to send
-   - Your input is immediately moved to `+Claude` and Claude's response streams in real-time
+   - Type your question/request directly in the `+Claude` window
+   - Middle-click the "Send" tag to send your message
+   - The conversation flows like a terminal chat session with clear USER:/CLAUDE: markers
+   - Debug output appears in real-time in the `+ClaudeTrace` window
 
 3. **Continue the conversation**:
-   - Type follow-up questions in `+Prompt`
-   - Middle-click the prompt text again
+   - Type your next message below the conversation in the `+Claude` window
+   - Middle-click "Send" again
    - Full conversation context is maintained automatically
 
 4. **Reset conversation**:
-   - Middle-click "Reset" in the `+Claude` window's tag bar
+   - Middle-click "Reset" in the `+Claude` window's tag bar to clear the context
+     for the current working directory.
 
 5. **Manage permissions**:
    - Middle-click "Permissions" in the `+Claude` window's tag bar
@@ -66,38 +67,15 @@ The unified Claude program provides fine-grained control over what tools Claude 
 
 #### Interactive Permission Editing
 
-1. Middle-click "Permissions" to see current permissions in the `+Claude-Permissions` window
-2. Edit the list by adding prefixes:
-   - `+` = Allow tool
-   - `-` = Deny tool
-   - `~` = Remove explicit permission (back to default)
-3. Select the modified text and middle-click to apply changes
-
-#### Example Permission Session
-
-1. Middle-click "Permissions" in the `+Claude` window
-2. The `+Claude-Permissions` window shows:
-```
-# Active permissions for: /home/user/myproject
-# Permission Mode: acceptEdits
-
-+ Bash
-+ Read
-+ Write
-+ Edit
-```
-
-3. To grant web access, edit to:
-```
-+ Bash
-+ Read
-+ Write
-+ Edit
-+ WebSearch
-+ WebFetch
-```
-
-4. Select the modified text and middle-click to apply the changes
+1. Middle-click "Permissions" to open the `+Claude-Permissions` window
+2. Use the commands in the permission window's tag bar:
+   - Middle-click "Show" to display current permissions
+   - Middle-click "Edit" to see all available tools for editing
+   - Edit the list by adding prefixes:
+     - `+` = Allow tool
+     - `-` = Deny tool
+     - `~` = Remove explicit permission (back to default)
+   - Middle-click "Save" to apply your changes
 
 ### Available Tools
 
@@ -143,7 +121,7 @@ Limit file operations to specific directories:
 acme-claude/
 ├── main.go             # Unified Claude program entry point
 ├── internal/
-│   ├── acme/          # Acme 9p protocol wrapper
+│   ├── acme/          # Acme interactions
 │   └── context/       # Context and settings management
 └── mkfile             # Plan 9 makefile
 ```
@@ -154,10 +132,10 @@ Each directory gets its own context stored in `~/.claude-acme/$directory_hash/`:
 - `context.json` - Conversation history
 - `settings.json` - Tool permissions and configuration
 
-### Window Management
+### Windows
 
-- `$pwd/+Prompt` - Input window (cleared after each use)
-- `$pwd/+Claude` - Persistent chat history
+- `$pwd/+Claude` - Interactive chat interface (input and conversation history combined)
+- `$pwd/+ClaudeTrace` - Debug output window showing Claude's internal operations
 - `$pwd/+Claude-Permissions` - Permission management interface
 
 ## Examples
@@ -172,8 +150,8 @@ Claude
 
 # Allow development tools
 # - Middle-click "Permissions" in +Claude window
-# - Edit to allow: +Bash(go:*) +Bash(git:*) +Read +Write +Edit
-# - Select text and middle-click to apply
+# - Middle-click "Edit", then modify list to: +Bash(go:*) +Bash(git:*) +Read +Write +Edit
+# - Middle-click "Save" to apply
 
 # Now Claude can run tests, build, and commit changes
 ```
@@ -186,8 +164,8 @@ Claude
 
 # Allow web access but restrict file operations
 # - Middle-click "Permissions" in +Claude window
-# - Edit to allow: +WebSearch +WebFetch +Read +Edit(/home/user/research/*)
-# - Select text and middle-click to apply
+# - Middle-click "Edit", then modify list to: +WebSearch +WebFetch +Read +Edit(/home/user/research/*)
+# - Middle-click "Save" to apply
 ```
 
 ### Safe Exploration
@@ -198,8 +176,8 @@ Claude
 
 # Very restricted permissions
 # - Middle-click "Permissions" in +Claude window
-# - Edit to allow: +Read +Bash(ls:*) +Bash(cat:*)
-# - Select text and middle-click to apply
+# - Middle-click "Edit", then modify list to: +Read +Bash(ls:*) +Bash(cat:*)
+# - Middle-click "Save" to apply
 
 # Claude can only read files and do basic listing
 ```
@@ -217,8 +195,8 @@ Claude
 - Try running `Claude` again to recreate windows
 
 ### Permission changes not taking effect
-- Make sure to select the entire modified text when middle-clicking to apply
-- Check the `+Claude-Permissions` window for error messages
+- Make sure to middle-click "Save" after editing the permission list
+- Check the `+Claude-Permissions` window for error messages after clicking "Save"
 - Verify the permission format (correct prefixes: `+`, `-`, `~`)
 
 ## License
