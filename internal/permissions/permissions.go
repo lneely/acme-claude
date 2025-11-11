@@ -1,6 +1,8 @@
 package permissions
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,8 +16,19 @@ type Permissions struct {
 	AdditionalDirs  []string `json:"additionalDirs,omitempty"`
 }
 
+func getPermissionsPath(cwd string) string {
+	homeDir, _ := os.UserHomeDir()
+	baseDir := filepath.Join(homeDir, ".claude-acme")
+	
+	hash := sha256.Sum256([]byte(cwd))
+	dirHash := hex.EncodeToString(hash[:])
+	permDir := filepath.Join(baseDir, dirHash)
+	os.MkdirAll(permDir, 0755)
+	return filepath.Join(permDir, "permissions.json")
+}
+
 func Read(cwd string) (*Permissions, error) {
-	path := filepath.Join(cwd, ".claude-permissions")
+	path := getPermissionsPath(cwd)
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return &Permissions{
@@ -38,7 +51,7 @@ func Read(cwd string) (*Permissions, error) {
 }
 
 func Write(cwd string, perms *Permissions) error {
-	permPath := filepath.Join(cwd, ".claude-permissions")
+	permPath := getPermissionsPath(cwd)
 	data, err := json.MarshalIndent(perms, "", " ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
