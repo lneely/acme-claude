@@ -20,9 +20,10 @@ import (
 )
 
 var (
-	cwd    string
-	pwname string
-	twname string
+	cwd              string
+	pwname           string
+	twname           string
+	currentSessionID string
 )
 
 func main() {
@@ -39,7 +40,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer pw.CloseFiles()
-	if err = acme.TagSet(pwname, "Send Permissions Reset"); err != nil {
+	if err = acme.TagSet(pwname, "Send Permissions Sessions"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to set prompt window tag: %v\n", err)
 		return
 	}
@@ -62,10 +63,10 @@ func main() {
 			switch string(e.Text) {
 			case "Send":
 				executePrompt(pw, tw)
-			case "Reset":
-				executeReset(tw)
 			case "Permissions":
 				go permissionsWindow()
+			case "Sessions":
+				go sessionsWindow(tw)
 			default:
 				pw.WriteEvent(e)
 			}
@@ -107,8 +108,15 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 		return
 	}
 
-	// Build claude command with arguments - use -c to continue latest session
-	args := []string{"-p", "-d", "-c"}
+	// Build claude command with arguments
+	args := []string{"-p", "-d"}
+
+	// Add session management
+	if currentSessionID != "" {
+		args = append(args, "-r", currentSessionID)
+	} else {
+		args = append(args, "-c")
+	}
 
 	if len(settings.AllowedTools) > 0 {
 		args = append(args, "--allowedTools")
@@ -198,9 +206,59 @@ func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
 	}
 }
 
-func executeReset(w *a.Win) {
-	w.Fprintf("body", "Reset functionality removed - Claude manages sessions automatically with -c flag\n")
-	w.Fprintf("body", "Each new conversation will continue the latest session.\n")
+func sessionsWindow(traceWin *a.Win) {
+	sessWindow, err := a.New()
+	if err != nil {
+		fmt.Printf("Couldn't create sessions window: %v\n", err)
+		return
+	}
+
+	sessWindowName := prependCwd("+Claude-Sessions")
+	sessWindow.Name(sessWindowName)
+	sessWindow.Fprintf("tag", "Load Refresh")
+	sessWindow.Ctl("clean")
+
+	// Show available sessions
+	listSessions(sessWindow)
+
+	// Event loop for sessions window
+	for e := range sessWindow.EventChan() {
+		switch e.C2 {
+		case 'x', 'X': // execute
+			text := string(e.Text)
+			switch {
+			case text == "Del":
+				sessWindow.Ctl("delete")
+				return
+			case text == "Load":
+				// Check if there's a chorded argument
+				if len(e.Arg) > 0 {
+					uuid := strings.TrimSpace(string(e.Arg))
+					uuid = strings.Trim(uuid, `"'[]`) // Remove quotes and brackets
+					if isValidUUID(uuid) {
+						loadSession(uuid, traceWin)
+						sessWindow.Ctl("delete")
+						return
+					} else {
+						sessWindow.Fprintf("body", "\nInvalid UUID format: %s\n", uuid)
+					}
+				} else {
+					sessWindow.Fprintf("body", "\nUsage: middle-click a UUID or 2-1 chord UUID into Load\n")
+				}
+			case text == "Refresh":
+				listSessions(sessWindow)
+			case isValidUUID(text):
+				// Middle-clicked UUID
+				loadSession(text, traceWin)
+				sessWindow.Ctl("delete")
+				return
+			default:
+				sessWindow.WriteEvent(e)
+			}
+		case 'l', 'L': // look
+			sessWindow.Ctl("clean")
+		}
+	}
 }
 
 func permissionsWindow() {
@@ -382,4 +440,108 @@ func remove(slice []string, item string) []string {
 		}
 	}
 	return result
+}
+
+func listSessions(w *a.Win) {
+	homeDir, _ := os.UserHomeDir()
+	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects")
+
+	// Convert current directory to claude project path format
+	currentDirPath := strings.ReplaceAll(cwd, "/", "-")
+	projectDir := filepath.Join(claudeProjectsDir, currentDirPath)
+
+	w.Clear()
+	w.Fprintf("body", "# Claude Sessions for %s - highlight line and click Load\n\n", cwd)
+
+	// Read session files
+	files, err := os.ReadDir(projectDir)
+	if err != nil {
+		w.Fprintf("body", "No sessions found: %v\n", err)
+		w.Ctl("clean")
+		return
+	}
+
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".jsonl") {
+			sessionID := strings.TrimSuffix(file.Name(), ".jsonl")
+			summary := getSessionSummary(filepath.Join(projectDir, file.Name()))
+			w.Fprintf("body", "[%s] | %s\n", sessionID, summary)
+		}
+	}
+
+	w.Ctl("clean")
+}
+
+func getSessionSummary(filePath string) string {
+	// Default fallback
+	summary := "conversation"
+
+	// Read first few lines to find summary
+	file, err := os.Open(filePath)
+	if err != nil {
+		return summary
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Look for summary field in JSONL
+		if strings.Contains(line, `"summary"`) {
+			// Simple extraction - look for "summary":"..." pattern
+			if idx := strings.Index(line, `"summary":"`); idx != -1 {
+				start := idx + len(`"summary":"`)
+				if end := strings.Index(line[start:], `"`); end != -1 {
+					extracted := line[start : start+end]
+					if extracted != "" {
+						summary = extracted
+						break
+					}
+				}
+			}
+		}
+		// Also look for first user message as fallback
+		if strings.Contains(line, `"role":"user"`) && strings.Contains(line, `"content"`) {
+			if idx := strings.Index(line, `"content":"`); idx != -1 {
+				start := idx + len(`"content":"`)
+				if end := strings.Index(line[start:], `"`); end != -1 {
+					content := line[start : start+end]
+					if len(content) > 50 {
+						content = content[:50] + "..."
+					}
+					if content != "" && summary == "conversation" {
+						summary = content
+					}
+				}
+			}
+		}
+	}
+
+	return summary
+}
+
+func isValidUUID(s string) bool {
+	// UUID pattern: 8-4-4-4-12 hex characters
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func loadSession(uuid string, traceWin *a.Win) {
+	currentSessionID = uuid
+	if traceWin != nil {
+		traceWin.Fprintf("body", "Loaded session %s\n", uuid)
+	}
 }
