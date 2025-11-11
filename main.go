@@ -28,6 +28,11 @@ var (
 func main() {
 	var err error
 
+	cwd, err = os.Getwd()
+	if err != nil {
+		log.Fatalf("couldn't get working directory: %v", err)
+	}
+
 	ctx, err = context.NewManager()
 	if err != nil {
 		log.Fatalf("Failed to create context manager: %v", err)
@@ -200,7 +205,7 @@ func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
 	scanner := bufio.NewScanner(stream)
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		if strings.HasPrefix(line, "[DEBUG] ") {
 			// Send debug messages to trace window
 			if traceWin != nil {
