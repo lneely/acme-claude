@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -14,22 +12,17 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"claude-acme/internal/acme"
-	"claude-acme/internal/context"
 	"claude-acme/internal/permissions"
 
 	a "9fans.net/go/acme"
 )
 
 var (
-	cwd string
-)
-
-const (
-	pwname = "+Claude"
-	twname = "+ClaudeTrace"
+	cwd    string
+	pwname string
+	twname string
 )
 
 func main() {
@@ -40,6 +33,7 @@ func main() {
 		log.Fatalf("couldn't get working directory: %v", err)
 	}
 
+	pwname = filepath.Join(cwd, "+Claude")
 	pw, err := acme.WindowOpen(pwname)
 	if err != nil {
 		log.Fatal(err)
@@ -50,6 +44,7 @@ func main() {
 		return
 	}
 
+	twname = filepath.Join(cwd, "+ClaudeTrace")
 	tw, err := acme.WindowOpen(twname)
 	if err != nil {
 		tw.Fprintf("body", "Warning: Could not open trace window: %v\n", err)
@@ -105,13 +100,6 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 	userInput := strings.TrimPrefix(string(promptContent), "USER:\n")
 	pw.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", userInput)
 
-	// Build full prompt with context
-	fullPrompt, err := context.BuildPrompt(cwd, userInput)
-	if err != nil {
-		pw.Fprintf("body", "Error building prompt with context: %v\n", err)
-		return
-	}
-
 	// Load settings for tool permissions
 	settings, err := permissions.Read(cwd)
 	if err != nil {
@@ -119,8 +107,8 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 		return
 	}
 
-	// Build claude command with arguments
-	args := []string{"-p", "-d"}
+	// Build claude command with arguments - use -c to continue latest session
+	args := []string{"-p", "-d", "-c"}
 
 	if len(settings.AllowedTools) > 0 {
 		args = append(args, "--allowedTools")
@@ -163,10 +151,10 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 		return
 	}
 
-	// Send prompt to claude
+	// Send user input to claude (it will continue the latest session)
 	go func() {
 		defer stdin.Close()
-		stdin.Write([]byte(fullPrompt))
+		stdin.Write([]byte(userInput))
 	}()
 
 	// Handle stdout and stderr streams
@@ -191,24 +179,6 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 
 	// Add separator
 	pw.Fprintf("body", "\n====================\n\nUSER:\n")
-
-	// Save to context (user input only - Claude's response will be added separately)
-	ctx, err := context.LoadContext(cwd)
-	if err != nil {
-		pw.Fprintf("body", "Warning: Failed to load context: %v\n", err)
-		return
-	}
-
-	ctx.Messages = append(ctx.Messages, context.Message{
-		Role:      "user",
-		Content:   userInput,
-		Timestamp: time.Now(),
-	})
-
-	err = context.SaveContext(cwd, ctx)
-	if err != nil {
-		pw.Fprintf("body", "Warning: Failed to save user message to context: %v\n", err)
-	}
 }
 
 func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
@@ -229,23 +199,8 @@ func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
 }
 
 func executeReset(w *a.Win) {
-	// Clear context by removing the file
-	homeDir, _ := os.UserHomeDir()
-	baseDir := filepath.Join(homeDir, ".claude-acme")
-
-	hash := sha256.Sum256([]byte(cwd))
-	dirHash := hex.EncodeToString(hash[:])
-	contextPath := filepath.Join(baseDir, dirHash, "context.json")
-
-	if _, err := os.Stat(contextPath); !os.IsNotExist(err) {
-		err = os.Remove(contextPath)
-		if err != nil {
-			w.Fprintf("body", "Error clearing context: %v\n", err)
-			return
-		}
-	}
-
-	w.Fprintf("body", "✓ Cleared Claude context for directory: %s\n", cwd)
+	w.Fprintf("body", "Reset functionality removed - Claude manages sessions automatically with -c flag\n")
+	w.Fprintf("body", "Each new conversation will continue the latest session.\n")
 }
 
 func permissionsWindow() {
