@@ -69,7 +69,7 @@ Now the permissions are updated. From here you may `+ <PermissionName>` to add a
 
 ![Alt text](./img/demo07.png)
 
-By default Claude continues the most recent chat session, however it is possible to load a different session. Middle-click `Sessions` in the `+Claude` window tag line to show the `+Claude-Sessions` window. This shows a brief message in the `+ClaudeTrace` window that the session loaded, and closes the session list.
+By default Claude continues the most recent chat session, however it is possible to load a different session. Middle-click `Sessions` in the `+Claude` window tag line to show the `+Claude-Sessions` window. You will see a list of sessions. Middle-click the UUID to load the session, or highlight it and pass it via 2-1 chord into the `Load` tag. This shows a brief message in the `+ClaudeTrace` window that the session loaded, and closes the session list.
 
 ![Alt text](./img/demo08.png)
 
