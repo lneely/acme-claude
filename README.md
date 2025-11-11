@@ -22,6 +22,23 @@ The `Claude` program provides a user interface for Acme users to interact with C
 - `Show` to see examples and add new permissions
 - "Secure by default" (`Read` only)
 
+## CLAUDE.md Output Guidelines
+
+Some things to consider adding to `$HOME/.claude/CLAUDE.md` to make using this program even better.
+
+**File Addressing**
+
+```
+Use Acme file addressing conventions.
+   - Good Example: `main.go` (the file itself)
+   - Good Example: `main.go:35` (main.go, line 35)
+   - Good Example: `main.go:35.5` (main.go, line 35, column 5)
+   - Good Example: `main.go:/regexToSearch/` (main.go, first occurrence matching regexToSearch: **simple regex**)
+   - Good Example: `main.go:35,38` (main.go, lines 35-38)
+   - Good Example: `main.go:35.5,38.5` (main.go, line 35 col 5 to line 38 col 5)
+   - Bad Examples: `main.go::35`, `main.go(35)`, `main.go :35`, `main.go, line 35`
+```
+
 ## Usage
 
 Start the program by typing `Claude` in the tag line of any window, and middle-clicking it. The working directory for Claude is "inherited" from that window.
