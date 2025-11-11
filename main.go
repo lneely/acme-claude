@@ -44,6 +44,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to set prompt window tag: %v\n", err)
 		return
 	}
+	pw.Fprintf("body", "USER: [Send]\n")
 
 	twname = filepath.Join(cwd, "+ClaudeTrace")
 	tw, err := acme.WindowOpen(twname)
@@ -98,8 +99,8 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 	}
 
 	// Strip USER: prefix if present and display user input
-	userInput := strings.TrimPrefix(string(promptContent), "USER:\n")
-	pw.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", userInput)
+	userInput := strings.TrimPrefix(string(promptContent), "USER: [Send]\n")
+	pw.Fprintf("body", "\nUSER: [Send]\n%s\n\nCLAUDE:\n", userInput)
 
 	// Load settings for tool permissions
 	settings, err := permissions.Read(cwd)
@@ -186,7 +187,7 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 	}
 
 	// Add separator
-	pw.Fprintf("body", "\n====================\n\nUSER:\n")
+	pw.Fprintf("body", "\n====================\n\nUSER: [Send]\n")
 }
 
 func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
