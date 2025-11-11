@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -12,15 +14,16 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"claude-acme/internal/acme"
 	"claude-acme/internal/context"
+	"claude-acme/internal/permissions"
 
 	a "9fans.net/go/acme"
 )
 
 var (
-	ctx *context.Manager
 	cwd string
 )
 
@@ -35,11 +38,6 @@ func main() {
 	cwd, err = os.Getwd()
 	if err != nil {
 		log.Fatalf("couldn't get working directory: %v", err)
-	}
-
-	ctx, err = context.NewManager()
-	if err != nil {
-		log.Fatalf("Failed to create context manager: %v", err)
 	}
 
 	pw, err := acme.WindowOpen(pwname)
@@ -72,7 +70,7 @@ func main() {
 			case "Reset":
 				executeReset(tw)
 			case "Permissions":
-				executePermissions()
+				go permissionsWindow()
 			default:
 				pw.WriteEvent(e)
 			}
@@ -108,14 +106,14 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 	pw.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", userInput)
 
 	// Build full prompt with context
-	fullPrompt, err := ctx.BuildPrompt(cwd, userInput)
+	fullPrompt, err := context.BuildPrompt(cwd, userInput)
 	if err != nil {
 		pw.Fprintf("body", "Error building prompt with context: %v\n", err)
 		return
 	}
 
 	// Load settings for tool permissions
-	settings, err := ctx.LoadSettings(cwd)
+	settings, err := permissions.Read(cwd)
 	if err != nil {
 		pw.Fprintf("body", "Error loading settings: %v\n", err)
 		return
@@ -195,7 +193,19 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 	pw.Fprintf("body", "\n====================\n\nUSER:\n")
 
 	// Save to context (user input only - Claude's response will be added separately)
-	err = ctx.AddMessage(cwd, "user", userInput)
+	ctx, err := context.LoadContext(cwd)
+	if err != nil {
+		pw.Fprintf("body", "Warning: Failed to load context: %v\n", err)
+		return
+	}
+
+	ctx.Messages = append(ctx.Messages, context.Message{
+		Role:      "user",
+		Content:   userInput,
+		Timestamp: time.Now(),
+	})
+
+	err = context.SaveContext(cwd, ctx)
 	if err != nil {
 		pw.Fprintf("body", "Warning: Failed to save user message to context: %v\n", err)
 	}
@@ -219,18 +229,23 @@ func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
 }
 
 func executeReset(w *a.Win) {
-	err := ctx.ClearContext(cwd)
-	if err != nil {
-		w.Fprintf("body", "Error clearing context: %v\n", err)
-		return
+	// Clear context by removing the file
+	homeDir, _ := os.UserHomeDir()
+	baseDir := filepath.Join(homeDir, ".claude-acme")
+
+	hash := sha256.Sum256([]byte(cwd))
+	dirHash := hex.EncodeToString(hash[:])
+	contextPath := filepath.Join(baseDir, dirHash, "context.json")
+
+	if _, err := os.Stat(contextPath); !os.IsNotExist(err) {
+		err = os.Remove(contextPath)
+		if err != nil {
+			w.Fprintf("body", "Error clearing context: %v\n", err)
+			return
+		}
 	}
 
 	w.Fprintf("body", "✓ Cleared Claude context for directory: %s\n", cwd)
-}
-
-func executePermissions() {
-	// Create permissions window similar to how Ampd creates sub-windows
-	go permissionsWindow()
 }
 
 func permissionsWindow() {
@@ -272,25 +287,21 @@ func permissionsWindow() {
 }
 
 func showCurrentPermissions(w *a.Win) {
-	settings, err := ctx.LoadSettings(cwd)
+	perms, err := permissions.Read(cwd)
 	if err != nil {
-		w.Fprintf("body", "Error loading settings: %v\n", err)
+		w.Fprintf("body", "Error loading permissions: %v\n", err)
 		return
 	}
 
 	w.Clear()
 	w.Fprintf("body", "# Active permissions for: %s\n", cwd)
-	w.Fprintf("body", "# Permission Mode: %s\n", settings.PermissionMode)
-	if len(settings.AdditionalDirs) > 0 {
-		w.Fprintf("body", "# Additional Directories: %s\n", strings.Join(settings.AdditionalDirs, ", "))
-	}
 	w.Fprintf("body", "\n")
 
-	for _, tool := range settings.AllowedTools {
+	for _, tool := range perms.AllowedTools {
 		w.Fprintf("body", "+ %s\n", tool)
 	}
 
-	for _, tool := range settings.DisallowedTools {
+	for _, tool := range perms.DisallowedTools {
 		w.Fprintf("body", "- %s\n", tool)
 	}
 
@@ -307,14 +318,14 @@ var allAvailableTools = []string{
 }
 
 func listAllToolsForEditing(w *a.Win) {
-	settings, err := ctx.LoadSettings(cwd)
+	perms, err := permissions.Read(cwd)
 	if err != nil {
-		w.Fprintf("body", "Error loading settings: %v\n", err)
+		w.Fprintf("body", "Error loading permissions: %v\n", err)
 		return
 	}
 
 	allowedSet := make(map[string]bool)
-	for _, tool := range settings.AllowedTools {
+	for _, tool := range perms.AllowedTools {
 		allowedSet[tool] = true
 	}
 
@@ -337,7 +348,7 @@ func savePermissionChanges(w *a.Win) {
 		return
 	}
 
-	settings, err := ctx.LoadSettings(cwd)
+	perms, err := permissions.Read(cwd)
 	if err != nil {
 		w.Fprintf("body", "Error loading settings: %v\n", err)
 		return
@@ -372,27 +383,27 @@ func savePermissionChanges(w *a.Win) {
 
 	// Update settings
 	for _, tool := range toAllow {
-		if !slices.Contains(settings.AllowedTools, tool) {
-			settings.AllowedTools = append(settings.AllowedTools, tool)
+		if !slices.Contains(perms.AllowedTools, tool) {
+			perms.AllowedTools = append(perms.AllowedTools, tool)
 		}
-		settings.DisallowedTools = remove(settings.DisallowedTools, tool)
+		perms.DisallowedTools = remove(perms.DisallowedTools, tool)
 	}
 
 	for _, tool := range toDeny {
-		if !slices.Contains(settings.DisallowedTools, tool) {
-			settings.DisallowedTools = append(settings.DisallowedTools, tool)
+		if !slices.Contains(perms.DisallowedTools, tool) {
+			perms.DisallowedTools = append(perms.DisallowedTools, tool)
 		}
-		settings.AllowedTools = remove(settings.AllowedTools, tool)
+		perms.AllowedTools = remove(perms.AllowedTools, tool)
 	}
 
 	for _, tool := range toRemove {
-		settings.AllowedTools = remove(settings.AllowedTools, tool)
-		settings.DisallowedTools = remove(settings.DisallowedTools, tool)
+		perms.AllowedTools = remove(perms.AllowedTools, tool)
+		perms.DisallowedTools = remove(perms.DisallowedTools, tool)
 	}
 
-	err = ctx.SaveSettings(cwd, settings)
+	err = permissions.Write(cwd, perms)
 	if err != nil {
-		w.Fprintf("body", "Error saving settings: %v\n", err)
+		w.Fprintf("body", "Error saving permissions: %v\n", err)
 		return
 	}
 
