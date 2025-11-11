@@ -22,7 +22,7 @@ The `Claude` program provides a user interface for Acme users to interact with C
 - `Show` to see examples and add new permissions
 - "Secure by default" (`Read` only)
 
-## CLAUDE.md Output Guidelines
+## CLAUDE.md
 
 Some things to consider adding to `$HOME/.claude/CLAUDE.md` to make using this program even better.
 
