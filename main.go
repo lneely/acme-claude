@@ -71,7 +71,7 @@ func main() {
 				pw.WriteEvent(e)
 			}
 		case 'l', 'L': // look
-			pw.Ctl("clean")
+			pw.WriteEvent(e)
 		}
 	}
 }
