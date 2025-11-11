@@ -20,9 +20,13 @@ import (
 )
 
 var (
-	ctx   *context.Manager
-	cwd   string
-	wname string
+	ctx *context.Manager
+	cwd string
+)
+
+const (
+	pwname = "+Claude"
+	twname = "+ClaudeTrace"
 )
 
 func main() {
@@ -38,26 +42,35 @@ func main() {
 		log.Fatalf("Failed to create context manager: %v", err)
 	}
 
-	wname = prependCwd("+Claude")
-
-	pw, err := acme.WindowOpen(wname)
+	pw, err := acme.WindowOpen(pwname)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer pw.CloseFiles()
-	if err = acme.TagSet(wname, "Send Permissions Reset"); err != nil {
+	if err = acme.TagSet(pwname, "Send Permissions Reset"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to set prompt window tag: %v\n", err)
 		return
 	}
+
+	tw, err := acme.WindowOpen(twname)
+	if err != nil {
+		tw.Fprintf("body", "Warning: Could not open trace window: %v\n", err)
+		tw = nil
+	}
+	defer func() {
+		if tw != nil {
+			tw.CloseFiles()
+		}
+	}()
 
 	for e := range pw.EventChan() {
 		switch e.C2 {
 		case 'x', 'X': // execute (middle-click)
 			switch string(e.Text) {
 			case "Send":
-				executePrompt(pw)
+				executePrompt(pw, tw)
 			case "Reset":
-				executeReset(pw)
+				executeReset(tw)
 			case "Permissions":
 				executePermissions()
 			default:
@@ -69,42 +82,42 @@ func main() {
 	}
 }
 
-func executePrompt(w *a.Win) {
+func executePrompt(pw *a.Win, tw *a.Win) {
 	// Read content from prompt window
-	promptContent, err := acme.BodyRead(wname)
+	promptContent, err := acme.BodyRead(pwname)
 	if err != nil {
-		w.Fprintf("body", "Error reading from prompt window: %v\n", err)
+		pw.Fprintf("body", "Error reading from prompt window: %v\n", err)
 		return
 	}
 
 	promptContent = bytes.TrimSpace(promptContent)
 	if len(promptContent) == 0 {
-		acme.BodyWrite(wname, "$", []byte("Prompt window is empty. Please enter your request in +Prompt window first.\n"))
+		acme.BodyWrite(pwname, "$", []byte("Prompt window is empty. Please enter your request in +Prompt window first.\n"))
 		return
 	}
 
 	// Clear prompt window
-	err = acme.BodyWrite(wname, ",", []byte(""))
+	err = acme.BodyWrite(pwname, ",", []byte(""))
 	if err != nil {
-		w.Fprintf("body", "Error clearing prompt window: %v\n", err)
+		pw.Fprintf("body", "Error clearing prompt window: %v\n", err)
 		return
 	}
 
 	// Strip USER: prefix if present and display user input
 	userInput := strings.TrimPrefix(string(promptContent), "USER:\n")
-	w.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", userInput)
+	pw.Fprintf("body", "\nUSER:\n%s\n\nCLAUDE:\n", userInput)
 
 	// Build full prompt with context
 	fullPrompt, err := ctx.BuildPrompt(cwd, userInput)
 	if err != nil {
-		w.Fprintf("body", "Error building prompt with context: %v\n", err)
+		pw.Fprintf("body", "Error building prompt with context: %v\n", err)
 		return
 	}
 
 	// Load settings for tool permissions
 	settings, err := ctx.LoadSettings(cwd)
 	if err != nil {
-		w.Fprintf("body", "Error loading settings: %v\n", err)
+		pw.Fprintf("body", "Error loading settings: %v\n", err)
 		return
 	}
 
@@ -130,25 +143,25 @@ func executePrompt(w *a.Win) {
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		w.Fprintf("body", "Error creating stdin pipe: %v\n", err)
+		pw.Fprintf("body", "Error creating stdin pipe: %v\n", err)
 		return
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		w.Fprintf("body", "Error creating stdout pipe: %v\n", err)
+		pw.Fprintf("body", "Error creating stdout pipe: %v\n", err)
 		return
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		w.Fprintf("body", "Error creating stderr pipe: %v\n", err)
+		pw.Fprintf("body", "Error creating stderr pipe: %v\n", err)
 		return
 	}
 
 	err = cmd.Start()
 	if err != nil {
-		w.Fprintf("body", "Error starting claude command: %v\n", err)
+		pw.Fprintf("body", "Error starting claude command: %v\n", err)
 		return
 	}
 
@@ -158,46 +171,33 @@ func executePrompt(w *a.Win) {
 		stdin.Write([]byte(fullPrompt))
 	}()
 
-	// Open trace window for debug output
-	traceWname := prependCwd("+ClaudeTrace")
-	traceWin, err := acme.WindowOpen(traceWname)
-	if err != nil {
-		w.Fprintf("body", "Warning: Could not open trace window: %v\n", err)
-		traceWin = nil
-	}
-	defer func() {
-		if traceWin != nil {
-			traceWin.CloseFiles()
-		}
-	}()
-
 	// Handle stdout and stderr streams
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		handleClaudeOutput(w, stdout, traceWin)
+		handleClaudeOutput(pw, stdout, tw)
 	}()
 	go func() {
 		defer wg.Done()
-		handleClaudeOutput(w, stderr, traceWin)
+		handleClaudeOutput(pw, stderr, tw)
 	}()
 
 	// Wait for command and streams to finish
 	err = cmd.Wait()
 	wg.Wait()
 	if err != nil {
-		w.Fprintf("body", "\n[Error: %v]", err)
+		pw.Fprintf("body", "\n[Error: %v]", err)
 		return
 	}
 
 	// Add separator
-	w.Fprintf("body", "\n====================\n\nUSER:\n")
+	pw.Fprintf("body", "\n====================\n\nUSER:\n")
 
 	// Save to context (user input only - Claude's response will be added separately)
 	err = ctx.AddMessage(cwd, "user", userInput)
 	if err != nil {
-		w.Fprintf("body", "Warning: Failed to save user message to context: %v\n", err)
+		pw.Fprintf("body", "Warning: Failed to save user message to context: %v\n", err)
 	}
 }
 
