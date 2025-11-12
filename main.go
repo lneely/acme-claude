@@ -456,6 +456,12 @@ func listSessions(w *a.Win) {
 
 	// Read session files
 	files, err := os.ReadDir(projectDir)
+	slices.SortFunc(files, func(a, b os.DirEntry) int {
+		afi, _ := a.Info()
+		bfi, _ := b.Info()
+
+		return bfi.ModTime().Compare(afi.ModTime())
+	})
 	if err != nil {
 		w.Fprintf("body", "No sessions found: %v\n", err)
 		w.Ctl("clean")
