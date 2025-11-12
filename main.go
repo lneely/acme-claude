@@ -49,7 +49,7 @@ func main() {
 	twname = filepath.Join(cwd, "+ClaudeTrace")
 	tw, err := acme.WindowOpen(twname)
 	if err != nil {
-		tw.Fprintf("body", "Warning: Could not open trace window: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: Could not open trace window: %v\n", err)
 		tw = nil
 	}
 	defer func() {
@@ -119,18 +119,44 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 		args = append(args, "-c")
 	}
 
+	// Invert allowed tools to create disallowed tools list
+	var disallowedTools []string
+	allowedSet := make(map[string]bool)
+	for _, tool := range settings.AllowedTools {
+		allowedSet[tool] = true
+	}
+
+	for _, tool := range allAvailableTools {
+		if !allowedSet[tool] {
+			disallowedTools = append(disallowedTools, tool)
+		}
+	}
+
+	// Add explicitly disallowed tools from settings
+	for _, tool := range settings.DisallowedTools {
+		if !slices.Contains(disallowedTools, tool) {
+			disallowedTools = append(disallowedTools, tool)
+		}
+	}
+
 	if len(settings.AllowedTools) > 0 {
 		args = append(args, "--allowedTools")
-		args = append(args, strings.Join(settings.AllowedTools, ","))
+		args = append(args, "\""+strings.Join(settings.AllowedTools, ",")+"\"")
 	}
 
-	if len(settings.DisallowedTools) > 0 {
+	if len(disallowedTools) > 0 {
 		args = append(args, "--disallowedTools")
-		args = append(args, strings.Join(settings.DisallowedTools, ","))
+		args = append(args, "\""+strings.Join(disallowedTools, ",")+"\"")
 	}
 
-	if settings.PermissionMode != "" {
-		args = append(args, "--permission-mode", settings.PermissionMode)
+	permMode := settings.PermissionMode
+	if permMode == "" {
+		permMode = "default"
+	}
+	args = append(args, "--permission-mode", permMode)
+
+	if tw != nil {
+		tw.Fprintf("body", "Executing claude with args: %v\n", args)
 	}
 
 	// Execute claude command
@@ -291,6 +317,8 @@ func permissionsWindow() {
 				listAllToolsForEditing(permWindow)
 			case "Save":
 				savePermissionChanges(permWindow)
+			case "default", "plan", "acceptEdits", "bypassPermissions":
+				setPermissionMode(permWindow, string(e.Text))
 			default:
 				permWindow.WriteEvent(e)
 			}
@@ -298,6 +326,28 @@ func permissionsWindow() {
 			permWindow.Ctl("clean")
 		}
 	}
+}
+
+func setPermissionMode(w *a.Win, mode string) {
+	perms, err := permissions.Read(cwd)
+	if err != nil {
+		w.Fprintf("body", "Error loading permissions: %v\n", err)
+		return
+	}
+
+	if mode == "default" {
+		perms.PermissionMode = ""
+	} else {
+		perms.PermissionMode = mode
+	}
+
+	err = permissions.Write(cwd, perms)
+	if err != nil {
+		w.Fprintf("body", "Error saving permissions: %v\n", err)
+		return
+	}
+
+	showCurrentPermissions(w)
 }
 
 func showCurrentPermissions(w *a.Win) {
@@ -309,7 +359,30 @@ func showCurrentPermissions(w *a.Win) {
 
 	w.Clear()
 	w.Fprintf("body", "# Active permissions for: %s\n", cwd)
+
+	displayMode := perms.PermissionMode
+	if displayMode == "" {
+		displayMode = "default"
+	}
+	w.Fprintf("body", "# PermissionMode: %s\n", displayMode)
 	w.Fprintf("body", "\n")
+
+	// Display permission mode buttons
+	currentMode := perms.PermissionMode
+	if currentMode == "" {
+		currentMode = "default"
+	}
+
+	modes := []string{"default", "plan", "acceptEdits", "bypassPermissions"}
+	w.Fprintf("body", "Mode: ")
+	for _, mode := range modes {
+		if mode == currentMode {
+			w.Fprintf("body", "[%s] ", mode)
+		} else {
+			w.Fprintf("body", "[%s] ", mode)
+		}
+	}
+	w.Fprintf("body", "\n\n")
 
 	for _, tool := range perms.AllowedTools {
 		w.Fprintf("body", "+ %s\n", tool)
@@ -328,7 +401,6 @@ var allAvailableTools = []string{
 	"WebSearch", "WebFetch", "Task", "TodoWrite", "ExitPlanMode",
 	"Bash(git:*)", "Bash(mkdir:*)", "Bash(ls:*)", "Bash(cd:*)",
 	"Bash(cp:*)", "Bash(mv:*)", "Bash(rm:*)", "Bash(chmod:*)",
-	"Edit(/path/to/dir/*)", "Read(/path/to/dir/*)", "Write(/path/to/dir/*)",
 }
 
 func listAllToolsForEditing(w *a.Win) {
