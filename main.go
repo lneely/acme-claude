@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"claude-acme/internal/acme"
 	"claude-acme/internal/permissions"
@@ -113,10 +115,19 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 	args := []string{"-p", "-d"}
 
 	// Add session management
+	var sessionID string
 	if currentSessionID != "" {
 		args = append(args, "-r", currentSessionID)
+		sessionID = currentSessionID
 	} else {
-		args = append(args, "-c")
+		// Get the most recent session ID and resume it explicitly
+		sessionID = getMostRecentSessionID()
+		if sessionID != "" {
+			args = append(args, "-r", sessionID)
+		} else {
+			// No existing session, create new one
+			args = append(args, "-c")
+		}
 	}
 
 	// Invert allowed tools to create disallowed tools list
@@ -204,9 +215,21 @@ func executePrompt(pw *a.Win, tw *a.Win) {
 		handleClaudeOutput(pw, stderr, tw)
 	}()
 
+	// Start tailing debug logs for all sessions if trace window exists
+	ctx, cancel := context.WithCancel(context.Background())
+	if tw != nil {
+		tw.Fprintf("body", "[TRACE] Starting debug log monitoring\n")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tailAllDebugLogs(ctx, tw)
+		}()
+	}
+
 	// Wait for command and streams to finish
 	err = cmd.Wait()
 	wg.Wait()
+	cancel()
 	if err != nil {
 		pw.Fprintf("body", "\n[Error: %v]", err)
 		return
@@ -622,5 +645,247 @@ func loadSession(uuid string, traceWin *a.Win) {
 	currentSessionID = uuid
 	if traceWin != nil {
 		traceWin.Fprintf("body", "Loaded session %s\n", uuid)
+	}
+}
+
+func getMostRecentSessionID() string {
+	homeDir, _ := os.UserHomeDir()
+	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects")
+
+	// Convert current directory to claude project path format
+	currentDirPath := strings.ReplaceAll(cwd, "/", "-")
+	projectDir := filepath.Join(claudeProjectsDir, currentDirPath)
+
+	// Read session files
+	files, err := os.ReadDir(projectDir)
+	if err != nil {
+		return ""
+	}
+
+	// Sort by modification time (most recent first)
+	slices.SortFunc(files, func(a, b os.DirEntry) int {
+		afi, _ := a.Info()
+		bfi, _ := b.Info()
+		return bfi.ModTime().Compare(afi.ModTime())
+	})
+
+	// Find most recent .jsonl file
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".jsonl") {
+			return strings.TrimSuffix(file.Name(), ".jsonl")
+		}
+	}
+
+	return ""
+}
+
+func tailAllDebugLogs(ctx context.Context, tw *a.Win) {
+	homeDir, _ := os.UserHomeDir()
+	debugDir := filepath.Join(homeDir, ".claude", "debug")
+
+	// Get baseline of existing files and their sizes
+	baselineFiles := make(map[string]int64)
+	files, _ := os.ReadDir(debugDir)
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".txt") {
+			filePath := filepath.Join(debugDir, file.Name())
+			if info, err := os.Stat(filePath); err == nil {
+				baselineFiles[filePath] = info.Size()
+			}
+		}
+	}
+
+	tw.Fprintf("body", "[TRACE] Monitoring debug directory with %d existing files\n", len(baselineFiles))
+
+	// Monitor for new content
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	noChangeCount := 0
+	totalLines := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			tw.Fprintf("body", "[TRACE] Debug monitoring stopped, read %d total lines\n", totalLines)
+			return
+		case <-ticker.C:
+			hadChanges := false
+			currentFiles, _ := os.ReadDir(debugDir)
+
+			for _, file := range currentFiles {
+				if !strings.HasSuffix(file.Name(), ".txt") {
+					continue
+				}
+
+				filePath := filepath.Join(debugDir, file.Name())
+				info, err := os.Stat(filePath)
+				if err != nil {
+					continue
+				}
+
+				currentSize := info.Size()
+				baselineSize, exists := baselineFiles[filePath]
+
+				if !exists || currentSize > baselineSize {
+					// New file or new content
+					lines := readNewLines(filePath, baselineSize, tw)
+					if lines > 0 {
+						hadChanges = true
+						totalLines += lines
+					}
+					// Always update baseline when file grows, even if no important lines
+					if currentSize > baselineSize {
+						hadChanges = true
+					}
+					baselineFiles[filePath] = currentSize
+				}
+			}
+
+			if hadChanges {
+				noChangeCount = 0
+			} else {
+				noChangeCount++
+				if noChangeCount > 60 {
+					tw.Fprintf("body", "[TRACE] No new debug output for 3 seconds, read %d total lines\n", totalLines)
+					return
+				}
+			}
+		}
+	}
+}
+
+func readNewLines(filePath string, startOffset int64, tw *a.Win) int {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	if startOffset > 0 {
+		file.Seek(startOffset, io.SeekStart)
+	}
+
+	scanner := bufio.NewScanner(file)
+	lineCount := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if isImportantDebugLine(line) {
+			tw.Fprintf("body", "%s\n", line)
+			lineCount++
+		}
+	}
+
+	return lineCount
+}
+
+func isImportantDebugLine(line string) bool {
+	// Filter for important tool usage events
+	importantPatterns := []string{
+		"for tool: Read",
+		"for tool: Write",
+		"for tool: Edit",
+		"for tool: Glob",
+		"for tool: Grep",
+		"for tool: Bash",
+		"for tool: WebSearch",
+		"for tool: WebFetch",
+		"for tool: Task",
+		"for tool: NotebookEdit",
+		"for tool: MultiEdit",
+		"tool_use",
+	}
+
+	for _, pattern := range importantPatterns {
+		if strings.Contains(line, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func tailDebugLog(ctx context.Context, sessionID string, tw *a.Win) {
+	homeDir, _ := os.UserHomeDir()
+	debugLogPath := filepath.Join(homeDir, ".claude", "debug", sessionID+".txt")
+
+	tw.Fprintf("body", "[TRACE] Looking for debug log at: %s\n", debugLogPath)
+
+	// Wait a moment for the debug file to be created
+	time.Sleep(100 * time.Millisecond)
+
+	// Try to open the file, retry a few times if it doesn't exist yet
+	var file *os.File
+	var err error
+	for i := 0; i < 10; i++ {
+		file, err = os.Open(debugLogPath)
+		if err == nil {
+			tw.Fprintf("body", "[TRACE] Debug log opened successfully after %d attempts\n", i+1)
+			break
+		}
+		select {
+		case <-ctx.Done():
+			tw.Fprintf("body", "[TRACE] Context cancelled while waiting for debug log\n")
+			return
+		case <-time.After(200 * time.Millisecond):
+			continue
+		}
+	}
+
+	if err != nil {
+		tw.Fprintf("body", "[TRACE] Failed to open debug log after retries: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	// Seek to end to get current position, then only read new content
+	currentOffset, _ := file.Seek(0, io.SeekEnd)
+	tw.Fprintf("body", "[TRACE] Seeking to end of debug log to skip old content (offset: %d)\n", currentOffset)
+
+	lineCount := 0
+	noDataCount := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			tw.Fprintf("body", "[TRACE] Context cancelled, read %d debug lines\n", lineCount)
+			return
+		default:
+			// Check current file size
+			info, err := file.Stat()
+			if err != nil {
+				tw.Fprintf("body", "[TRACE] Stat error: %v\n", err)
+				return
+			}
+
+			fileSize := info.Size()
+			if fileSize > currentOffset {
+				// New data available, read it
+				file.Seek(currentOffset, io.SeekStart)
+				scanner := bufio.NewScanner(file)
+				hadNewLines := false
+				for scanner.Scan() {
+					hadNewLines = true
+					line := scanner.Text()
+					if isImportantDebugLine(line) {
+						lineCount++
+						tw.Fprintf("body", "%s\n", line)
+					}
+				}
+				currentOffset = fileSize
+				if hadNewLines {
+					noDataCount = 0
+				}
+			} else {
+				// No new data
+				noDataCount++
+				if noDataCount > 60 {
+					// No new data for 3 seconds, assume file is complete
+					tw.Fprintf("body", "[TRACE] No new data, read %d debug lines total\n", lineCount)
+					return
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
 	}
 }
