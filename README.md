@@ -35,14 +35,10 @@ Some things to consider adding to `$HOME/.claude/CLAUDE.md` to make using this p
 **File Addressing**
 
 ```
-Use Acme file addressing conventions.
-   - Good Example: `main.go` (the file itself)
-   - Good Example: `main.go:35` (main.go, line 35)
-   - Good Example: `main.go:35.5` (main.go, line 35, column 5)
-   - Good Example: `main.go:/regexToSearch/` (main.go, first occurrence matching regexToSearch: **simple regex**)
-   - Good Example: `main.go:35,38` (main.go, lines 35-38)
-   - Good Example: `main.go:35.5,38.5` (main.go, line 35 col 5 to line 38 col 5)
-   - Bad Examples: `main.go::35`, `main.go(35)`, `main.go :35`, `main.go, line 35`
+1. Always use Acme file addressing conventions.
+   addrelem='((#?[0-9]+)|(/[A-Za-z0-9_\^]+/?)|[.$])'
+   addr=:($addrelem([,;+\-]$addrelem)*)
+   twocolonaddr = ([0-9]+)[:.]([0-9]+)
 ```
 
 ## Usage
