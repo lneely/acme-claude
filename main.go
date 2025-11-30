@@ -66,6 +66,8 @@ func main() {
 
 func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
 	scanner := bufio.NewScanner(stream)
+	// Increase buffer to handle large lines (up to 1MB)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -78,6 +80,10 @@ func handleClaudeOutput(claudeWin *a.Win, stream io.Reader, traceWin *a.Win) {
 			// Send regular output to claude window
 			claudeWin.Fprintf("body", "%s\n", line)
 		}
+	}
+	// Check for scanner errors (e.g., lines too large for buffer)
+	if err := scanner.Err(); err != nil {
+		claudeWin.Fprintf("body", "\n[Scanner Error: %v]\n", err)
 	}
 }
 
@@ -215,9 +221,11 @@ func sendPrompt(pw *a.Win, tw *a.Win) {
 	}
 
 	// Wait for command and streams to finish
-	err = cmd.Wait()
+	// IMPORTANT: Must wait for goroutines to finish reading BEFORE cmd.Wait()
+	// Per Go docs: "It is incorrect to call Wait before all reads from the pipe have completed"
 	wg.Wait()
 	cancel()
+	err = cmd.Wait()
 	if err != nil {
 		pw.Fprintf("body", "\n[Error: %v]", err)
 		return

@@ -100,6 +100,8 @@ func readFile(filePath string, startOffset int64, tw *a.Win) int {
 	}
 
 	scanner := bufio.NewScanner(file)
+	// Increase buffer to handle large lines (up to 1MB)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineCount := 0
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -107,6 +109,10 @@ func readFile(filePath string, startOffset int64, tw *a.Win) int {
 			tw.Fprintf("body", "%s\n", line)
 			lineCount++
 		}
+	}
+	// Check for scanner errors (e.g., lines too large for buffer)
+	if err := scanner.Err(); err != nil {
+		tw.Fprintf("body", "[Debug Scanner Error: %v]\n", err)
 	}
 
 	return lineCount

@@ -86,6 +86,8 @@ func getSummary(path string) string {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	// Increase buffer to handle large lines (up to 1MB)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		// Look for summary field in JSONL
@@ -117,6 +119,11 @@ func getSummary(path string) string {
 				}
 			}
 		}
+	}
+	// Check for scanner errors (e.g., lines too large for buffer)
+	if err := scanner.Err(); err != nil {
+		// Silently fall back to default summary on error
+		summary = "conversation (parse error)"
 	}
 
 	return summary
