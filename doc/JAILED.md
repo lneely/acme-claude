@@ -25,6 +25,14 @@ claude {
 }
 ```
 
+### doas
+
+You will need `doas` installed. For `acme-claude`, you can allow your user to run `jexec` with nopass (restrict this as you see fit: main thing is it can run `claude` in the jail without requiring a password for every interaction). In `/usr/local/etc/doas.conf`:
+
+```
+permit nopass <youruser> as root cmd jexec
+```
+
 ### Wrapper Script
 
 Use the provided `claude.jailed` script to execute Claude commands in the jail. Configure these variables at the top of the script to match your configuration.
