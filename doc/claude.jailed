@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+
+export TERM=xterm-256color
+
+# Configuration
+JAIL_USER="claudeuser"
+JAIL_NAME="claude"
+SHARED_DIRS="src prj"
+
+# Auto-detect current working directory and map host path to jail path
+current_dir=$(pwd)
+wd=""
+
+for dir in $SHARED_DIRS; do
+  case "$current_dir" in
+    $HOME/$dir/*)
+      wd=$(echo "$current_dir" | sed "s|^$HOME/$dir/|/home/$JAIL_USER/$dir/|")
+      break
+      ;;
+  esac
+done
+
+doas jexec "$JAIL_NAME" su - "$JAIL_USER" -c "cd '$wd' && claude \"\$@\"" -- "$@"
